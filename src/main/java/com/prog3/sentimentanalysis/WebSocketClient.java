@@ -41,7 +41,11 @@ public class WebSocketClient extends TextWebSocketHandler implements CommandLine
         subscribeToTopic(topic);
     }
 
-    private void subscribeToTopic(String topic) {
+    public void setSession(WebSocketSession session) {
+        this.session = session;
+    }
+
+    public void subscribeToTopic(String topic) {
         try {
             session.sendMessage(new TextMessage("topic: " + topic));
             System.out.println("Subscribed to topic: " + topic);
@@ -117,9 +121,14 @@ public class WebSocketClient extends TextWebSocketHandler implements CommandLine
             // Initialize thread pool
             executorService = Executors.newCachedThreadPool();
         }
-
         // Submit task to thread pool
         executorService.submit(() -> analyzeSentimentSequential(reviewText));
+    }
+
+    public void connectToServer(){
+        org.springframework.web.socket.client.WebSocketClient webSocketClient = new StandardWebSocketClient();
+        String serverUri = "wss://prog3.student.famnit.upr.si/sentiment";
+        webSocketClient.doHandshake(this, serverUri);
     }
 
     @Override
@@ -151,15 +160,14 @@ public class WebSocketClient extends TextWebSocketHandler implements CommandLine
             return;
         }
 
-        org.springframework.web.socket.client.WebSocketClient webSocketClient = new StandardWebSocketClient();
-        String serverUri = "wss://prog3.student.famnit.upr.si/sentiment";
-        webSocketClient.doHandshake(this, serverUri);
+        // Connect to the server to get reviews
+        connectToServer();
 
         // Schedule the task to output review counts every second
         scheduler = Executors.newSingleThreadScheduledExecutor();
         scheduler.scheduleAtFixedRate(() -> {
             System.out.println("Reviews Analyzed per Second: " + reviewCount);
-            reviewCount = 0;
+            reviewCount = 0; // Reset after 1 second
         }, 0, 1, TimeUnit.SECONDS);
     }
 }
