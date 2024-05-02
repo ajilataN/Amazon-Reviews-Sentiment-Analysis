@@ -18,7 +18,7 @@ public class JsonParser {
                 JsonNode innerNode = objectMapper.readTree(reviewText);
                 JsonNode reviewTextNode = innerNode.get("reviewText");
 
-                System.out.println("Review text: "+ reviewTextNode);
+//                System.out.println("Review text: "+ reviewTextNode);
 
                 if (reviewTextNode != null) {
                     return reviewTextNode.asText();

@@ -5,33 +5,14 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
-
 public class SentimentAnalysisMPI {
     private static String topic = null;
     private static WebSocketSession session;
-    private final TextWebSocketHandler webSocketHandler;
-    private static BlockingQueue<String> messageQueue = new LinkedBlockingQueue<>();
+//    private final TextWebSocketHandler webSocketHandler;
+
+    // Constructor
     public SentimentAnalysisMPI() {
-        messageQueue = new LinkedBlockingQueue<>();
-        webSocketHandler = new TextWebSocketHandler(){
-            @Override
-            public void afterConnectionEstablished(WebSocketSession session) {
-                System.out.println("WebSocket connection established.");
-                // Assign the session to the session field for further use if needed
-                SentimentAnalysisMPI.session = session;
-                subscribeToTopic(topic);
-            }
-            @Override
-            protected void handleTextMessage(WebSocketSession session, TextMessage message) {
-                String receivedMessage = message.getPayload();
-                String extractedReview = JsonParser.extractReviewText(receivedMessage, topic);
-                System.out.println("Message: " + extractedReview);
-                // Store the message in the queue
-                messageQueue.offer(extractedReview);
-            }
-        };
+
     }
     public static void main(String[] args) throws InterruptedException {
         MPI.Init(args);
@@ -75,26 +56,71 @@ public class SentimentAnalysisMPI {
     private void masterProcess() throws InterruptedException {
         System.out.println("Master");
         connectToServer();
-        String message = messageQueue.take();
-        System.out.println("I got the message: "+ message);
-//        while (true) {
-//            try {
-//
-//                Thread.sleep(Long.MAX_VALUE);
-//            } catch (InterruptedException e) {
-//                e.printStackTrace();
-//            }
-//        }
+
+        while (true) {
+            try {
+                Thread.sleep(Long.MAX_VALUE);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
     }
 
     private void workerProcess(int rank) {
+        // Create an instance of SentimentAnalyzer
+        SentimentAnalyzer sentimentAnalyzer = new SentimentAnalyzer();
 
+        // Receive messages from master process
+        while (true) {
+            // Buffer to receive the message
+            byte[] messageBytes = new byte[4096]; // Adjust the size as per your message size
+
+            // Receive message from master process
+            MPI.COMM_WORLD.Recv(messageBytes, 0, messageBytes.length, MPI.BYTE, 0, MPI.ANY_TAG);
+
+            // Convert received bytes to string
+            String receivedMessage = new String(messageBytes).trim();
+
+            System.out.println("what worker process receives "+receivedMessage);
+
+            // Perform sentiment analysis on the received message
+            String sentiment = sentimentAnalyzer.analyzeSentiment(receivedMessage);
+
+            // Print the sentiment result
+            System.out.println("Worker Process " + rank + " - Sentiment: " + sentiment);
+        }
     }
-
     private void connectToServer(){
         org.springframework.web.socket.client.WebSocketClient webSocketClient = new StandardWebSocketClient();
         String serverUri = "wss://prog3.student.famnit.upr.si/sentiment";
-        webSocketClient.doHandshake(webSocketHandler, serverUri);
+        webSocketClient.doHandshake(new TextWebSocketHandler() {
+            @Override
+            public void afterConnectionEstablished(WebSocketSession session) {
+                System.out.println("WebSocket connection established.");
+                SentimentAnalysisMPI.session = session;
+                subscribeToTopic(topic);
+            }
+            @Override
+            protected void handleTextMessage(WebSocketSession session, TextMessage message) {
+                String receivedMessage = message.getPayload();
+                String extractedReview = JsonParser.extractReviewText(receivedMessage, topic);
+                System.out.println("Message: " + extractedReview);
+
+                // Convert the extracted review to bytes
+                byte[] reviewBytes = extractedReview.getBytes();
+
+                // Get the number of worker processes
+                int numWorkers = MPI.COMM_WORLD.Size() - 1; // Subtracting 1 for master process
+
+                // Distribute the review to worker processes
+                for (int workerRank = 1; workerRank <= numWorkers; workerRank++) {
+                    MPI.COMM_WORLD.Send(reviewBytes, 0, reviewBytes.length, MPI.BYTE, workerRank, 0);
+                    System.out.println("Sent review to worker process " + workerRank);
+                }
+
+            }
+
+        }, serverUri);
     }
     public void subscribeToTopic(String topic) {
         try {
@@ -105,4 +131,6 @@ public class SentimentAnalysisMPI {
             e.printStackTrace();
         }
     }
+
+
 }
