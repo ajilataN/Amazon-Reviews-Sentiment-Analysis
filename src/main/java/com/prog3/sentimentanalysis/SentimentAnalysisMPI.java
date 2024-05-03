@@ -8,12 +8,9 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
 public class SentimentAnalysisMPI {
     private static String topic = null;
     private static WebSocketSession session;
-//    private final TextWebSocketHandler webSocketHandler;
 
     // Constructor
-    public SentimentAnalysisMPI() {
-
-    }
+    public SentimentAnalysisMPI() {    }
     public static void main(String[] args) throws InterruptedException {
         MPI.Init(args);
         int me = MPI.COMM_WORLD.Rank();
@@ -39,31 +36,17 @@ public class SentimentAnalysisMPI {
             return;
         }
 
+        // Decide if master or worker process is called
         SentimentAnalysisMPI sentimentAnalysisMPI = new SentimentAnalysisMPI();
-
-        if (me == 0) {
-            // Master process
-            sentimentAnalysisMPI.masterProcess();
-        }
-        else {
-            // Worker processes
-            sentimentAnalysisMPI.workerProcess(me);
-        }
+        if (me == 0) { sentimentAnalysisMPI.masterProcess(); }
+        else { sentimentAnalysisMPI.workerProcess(me); }
 
         MPI.Finalize();
     }
 
-    private void masterProcess() throws InterruptedException {
+    private void masterProcess() {
         System.out.println("Master");
         connectToServer();
-
-        while (true) {
-            try {
-                Thread.sleep(Long.MAX_VALUE);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-        }
     }
 
     private void workerProcess(int rank) {
@@ -81,7 +64,7 @@ public class SentimentAnalysisMPI {
             // Convert received bytes to string
             String receivedMessage = new String(messageBytes).trim();
 
-            System.out.println("what worker process receives "+receivedMessage);
+            System.out.println("What worker process receives: "+receivedMessage);
 
             // Perform sentiment analysis on the received message
             String sentiment = sentimentAnalyzer.analyzeSentiment(receivedMessage);
@@ -97,40 +80,42 @@ public class SentimentAnalysisMPI {
             @Override
             public void afterConnectionEstablished(WebSocketSession session) {
                 System.out.println("WebSocket connection established.");
+                // Subscribe to topic
                 SentimentAnalysisMPI.session = session;
-                subscribeToTopic(topic);
+                try {
+                    session.sendMessage(new TextMessage("topic: " + topic));
+                    System.out.println("Subscribed to topic: " + topic);
+                } catch (Exception e) {
+                    // TODO: Check more robust option
+                    e.printStackTrace();
+                }
             }
             @Override
             protected void handleTextMessage(WebSocketSession session, TextMessage message) {
                 String receivedMessage = message.getPayload();
                 String extractedReview = JsonParser.extractReviewText(receivedMessage, topic);
-                System.out.println("Message: " + extractedReview);
 
-                // Convert the extracted review to bytes
-                byte[] reviewBytes = extractedReview.getBytes();
+                // Check if extractedReview is null before using it
+                if (extractedReview != null) {
+                    System.out.println("Message: " + extractedReview);
 
-                // Get the number of worker processes
-                int numWorkers = MPI.COMM_WORLD.Size() - 1; // Subtracting 1 for master process
+                    // Convert the extracted review to bytes
+                    byte[] reviewBytes = extractedReview.getBytes();
 
-                // Distribute the review to worker processes
-                for (int workerRank = 1; workerRank <= numWorkers; workerRank++) {
-                    MPI.COMM_WORLD.Send(reviewBytes, 0, reviewBytes.length, MPI.BYTE, workerRank, 0);
-                    System.out.println("Sent review to worker process " + workerRank);
+                    // Get the number of worker processes
+                    int numWorkers = MPI.COMM_WORLD.Size() - 1; // Subtracting 1 for master process
+
+                    // Distribute the review to worker processes
+                    for (int workerRank = 1; workerRank <= numWorkers; workerRank++) {
+                        MPI.COMM_WORLD.Send(reviewBytes, 0, reviewBytes.length, MPI.BYTE, workerRank, 0);
+                        System.out.println("Sent review to worker process " + workerRank);
+                    }
+                } else {
+                    // Handle the case where extractedReview is null
+                    System.out.println("Extracted review is null. Skipping processing.");
                 }
-
             }
 
         }, serverUri);
     }
-    public void subscribeToTopic(String topic) {
-        try {
-            session.sendMessage(new TextMessage("topic: " + topic));
-            System.out.println("Subscribed to topic: " + topic);
-        } catch (Exception e) {
-            // TODO: Check more robust option
-            e.printStackTrace();
-        }
-    }
-
-
 }
