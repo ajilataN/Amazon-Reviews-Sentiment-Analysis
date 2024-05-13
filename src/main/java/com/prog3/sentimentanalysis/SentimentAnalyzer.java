@@ -7,6 +7,10 @@ import edu.stanford.nlp.sentiment.SentimentCoreAnnotations;
 
 import java.util.Properties;
 
+/**
+ *  This class serves to make the proper sentiment analysis to a review.
+* It uses the Standford CoreNLP library for that purpose.
+* */
 public class SentimentAnalyzer {
     private StanfordCoreNLP pipeline;
 
