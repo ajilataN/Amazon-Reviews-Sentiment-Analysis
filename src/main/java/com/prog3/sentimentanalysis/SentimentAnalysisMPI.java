@@ -7,6 +7,9 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.*;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 public class SentimentAnalysisMPI {
     // Valid topic from command arguments
@@ -19,9 +22,18 @@ public class SentimentAnalysisMPI {
     private static final String OUTPUT_FILE = "distributed_review_counts.txt";
 
     // Method to write results to a text file
-    private void saveToFile(int reviewsPerSecond) {
+    private static void saveToFile(int reviewsPerSecond) {
         try (PrintWriter writer = new PrintWriter(new FileWriter(OUTPUT_FILE, true))) {
             writer.println("Reviews processed per second: " + reviewsPerSecond);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    // Method to clear the output file
+    private static void clearOutputFile() {
+        try (PrintWriter writer = new PrintWriter(new FileWriter(OUTPUT_FILE))) {
+            writer.print("");
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -31,6 +43,19 @@ public class SentimentAnalysisMPI {
     public SentimentAnalysisMPI() {    }
     // MAIN method
     public static void main(String[] args) {
+
+        // Set the duration for application execution (in minutes)
+        int executionDurationMinutes = 10;
+
+        // Schedule a task to shutdown the application after the specified duration
+        ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+        scheduler.schedule(() -> {
+            System.out.println("Application execution completed. Shutting down...");
+            // Finalize MPI environment and exit the application
+            MPI.Finalize();
+            System.exit(0);
+        }, executionDurationMinutes, TimeUnit.MINUTES);
+
         // Environment initialization
         MPI.Init(args);
 
@@ -64,7 +89,7 @@ public class SentimentAnalysisMPI {
         SentimentAnalysisMPI sentimentAnalysisMPI = new SentimentAnalysisMPI();
         if (me == 0) {
             // Master process in case rank is 0
-            sentimentAnalysisMPI.masterProcess();
+            sentimentAnalysisMPI.masterProcess(size);
         }
         else {
             // Worker processes otherwise
@@ -76,7 +101,8 @@ public class SentimentAnalysisMPI {
 
     // Master process logic
     // Handles connection, subscription to a topic and parses the text review
-    private void masterProcess() {
+    private void masterProcess(int numWorkers) {
+        clearOutputFile(); // Clear the output file at the start
         org.springframework.web.socket.client.WebSocketClient webSocketClient = new StandardWebSocketClient();
         String serverUri = "wss://prog3.student.famnit.upr.si/sentiment";
         webSocketClient.doHandshake(new TextWebSocketHandler() {
@@ -118,6 +144,21 @@ public class SentimentAnalysisMPI {
             }
 
         }, serverUri);
+        // Schedule a task to log the number of reviews processed per second
+        ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+        scheduler.scheduleAtFixedRate(() -> {
+            int totalReviewsPerSecond = 0;
+
+            // Receive the number of processed reviews from each worker
+            for (int i = 1; i < numWorkers; i++) {
+                int[] reviewsPerSecond = new int[1];
+                MPI.COMM_WORLD.Recv(reviewsPerSecond, 0, 1, MPI.INT, i, 1);
+                totalReviewsPerSecond += reviewsPerSecond[0];
+            }
+
+            System.out.println("Total reviews processed per second: " + totalReviewsPerSecond);
+            saveToFile(totalReviewsPerSecond);
+        }, 1, 1, TimeUnit.SECONDS);
     }
 
     // Worker process logic
@@ -127,8 +168,14 @@ public class SentimentAnalysisMPI {
         SentimentAnalyzer sentimentAnalyzer = new SentimentAnalyzer();
 
         // Initialize variables for tracking reviews processed per second
-        int analyzedReviews = 0;
-        long startTime = System.currentTimeMillis();
+        final int[] analyzedReviews = {0};
+        // Schedule a task to log the number of reviews processed per second
+        ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+        scheduler.scheduleAtFixedRate(() -> {
+            int[] reviewsPerSecond = {analyzedReviews[0]};
+            MPI.COMM_WORLD.Send(reviewsPerSecond, 0, 1, MPI.INT, 0, 1);
+            analyzedReviews[0] = 0; // Reset count after sending
+        }, 1, 1, TimeUnit.SECONDS);
 
         // Receive messages from master process
         while (true) {
@@ -146,20 +193,7 @@ public class SentimentAnalysisMPI {
                 // Print the sentiment result
                 System.out.println("Worker Process " + rank + " - Sentiment: " + sentiment);
                 // Increment the count of reviews processed this second
-                analyzedReviews++;
-            }
-
-            // Limit for one second
-            long currentTime = System.currentTimeMillis();
-            if (currentTime - startTime >= 1000) {
-                // Print how many reviews were analyzed within the timeframe
-                System.out.println("Reviews processed per second: " + analyzedReviews);
-                // Also save the results in a file
-                saveToFile(analyzedReviews);
-                // Reset the count for the next second
-                analyzedReviews = 0;
-                // Update the start time
-                startTime = currentTime;
+                analyzedReviews[0]++;
             }
         }
     }

@@ -143,13 +143,17 @@
                 return;
             }
 
+            output_file = mode.equals(SEQUENTIAL_MODE) ? "sequential_review_counts.txt" : "parallel_review_counts.txt";
+
+            // Clear the output file at the beginning
+            clearOutputFile();
+
             // Connect to the server to get reviews
             connectToServer();
 
             // Schedule the task to output review counts every second
             ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
             scheduler.scheduleAtFixedRate(() -> {
-                output_file = mode.equals(SEQUENTIAL_MODE) ? "sequential_review_counts.txt" : "parallel_review_counts.txt";
                 System.out.println("Reviews Analyzed per Second: " + reviewCount);
                 saveToFile(reviewCount);
                 reviewCount = 0; // Reset after 1 second
@@ -160,6 +164,15 @@
         private void saveToFile(int reviewsPerSecond) {
             try (PrintWriter writer = new PrintWriter(new FileWriter(output_file, true))) {
                 writer.println("Reviews processed per second: " + reviewsPerSecond);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+
+        // Method to clear the output file
+        private void clearOutputFile() {
+            try (PrintWriter writer = new PrintWriter(new FileWriter(output_file))) {
+                writer.print("");
             } catch (IOException e) {
                 e.printStackTrace();
             }
